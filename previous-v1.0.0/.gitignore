@@ -23,9 +23,6 @@ dist/
 build/
 release/
 runtime/
-backups/
-.uooc-status.json
-.uooc-status.json.tmp
 cache/
 .cache/
 coverage/

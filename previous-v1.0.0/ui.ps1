@@ -1,4 +1,4 @@
-﻿param([switch]$SelfTest, [string]$PreviewPath, [scriptblock]$SelfTestCheck)
+﻿param([switch]$SelfTest, [string]$PreviewPath)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -7,13 +7,11 @@ Add-Type -AssemblyName System.Drawing
 $script:Worker = $null
 $script:LastLog = ''
 $script:LastConfigTime = $null
-$script:LastStatusTime = $null
 $script:Root = $PSScriptRoot
 $script:ConfigPath = Join-Path $PSScriptRoot 'config.json'
 $script:AuthPath = Join-Path $PSScriptRoot '.uooc-auth.json'
 $script:LogPath = Join-Path $PSScriptRoot 'uooc.log'
 $script:TaskName = 'UoocDailyCheckin'
-$script:StatusPath = Join-Path $PSScriptRoot '.uooc-status.json'
 $uiMutex = $null
 if (-not $SelfTest) {
     $hash = [System.Security.Cryptography.SHA256]::Create()
@@ -59,9 +57,9 @@ function Add-Button($Parent, $Text, $X, $Y, $Width, $Height, $Primary = $false) 
 }
 
 $form = [System.Windows.Forms.Form]::new()
-$form.Text = 'Uooc 签到助手 v1.1.0'
-$form.ClientSize = [System.Drawing.Size]::new(1000, 780)
-$form.MinimumSize = [System.Drawing.Size]::new(1016, 819)
+$form.Text = 'Uooc 签到助手'
+$form.ClientSize = [System.Drawing.Size]::new(1000, 720)
+$form.MinimumSize = [System.Drawing.Size]::new(1016, 759)
 $form.StartPosition = 'CenterScreen'
 $form.AutoScaleMode = 'Dpi'
 $form.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#F3F6FB')
@@ -76,13 +74,13 @@ $header.Anchor = 'Top, Left, Right'
 $header.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#13233F')
 $form.Controls.Add($header)
 $null = Add-Label $header 'Uooc 自动签到' 24 18 570 40 24 '#FFFFFF' $true
-$null = Add-Label $header '保存课程，核实签到；登录失效时会提醒重新登录。' 26 66 610 26 10 '#CBD5E1'
+$null = Add-Label $header '登录一次，保存课程，以后点一下就能签到。' 26 66 590 26 10 '#CBD5E1'
 $statusLabel = Add-Label $header '就绪' 650 42 324 32 11 '#A7F3D0' $true
 $statusLabel.TextAlign = 'MiddleRight'
 $statusLabel.Anchor = 'Top, Right'
 
 $coursePanel = [System.Windows.Forms.Panel]::new()
-$coursePanel.SetBounds(24, 124, 566, 364)
+$coursePanel.SetBounds(24, 124, 566, 304)
 $coursePanel.Anchor = 'Top, Left, Right'
 $coursePanel.BackColor = [System.Drawing.Color]::White
 $form.Controls.Add($coursePanel)
@@ -90,24 +88,22 @@ $null = Add-Label $coursePanel '我的签到课程' 20 16 400 28 13 '#172B4D' $t
 $accountLabel = Add-Label $coursePanel '' 20 50 526 26 10 '#667085'
 $accountLabel.Anchor = 'Top, Left, Right'
 $courseList = [System.Windows.Forms.ListView]::new()
-$courseList.SetBounds(20, 84, 526, 214)
+$courseList.SetBounds(20, 84, 526, 158)
 $courseList.Anchor = 'Top, Left, Right'
 $courseList.View = 'Details'
 $courseList.FullRowSelect = $true
 $courseList.HideSelection = $false
 $courseList.MultiSelect = $false
 $courseList.BorderStyle = 'FixedSingle'
-$null = $courseList.Columns.Add('课程名称', 236)
-$null = $courseList.Columns.Add('已签 / 满分需', 112)
-$null = $courseList.Columns.Add('课程周期 ID', 150)
-$courseList.ShowItemToolTips = $true
+$null = $courseList.Columns.Add('课程名称', 326)
+$null = $courseList.Columns.Add('课程周期 ID', 176)
 $coursePanel.Controls.Add($courseList)
-$null = Add-Label $coursePanel '次数为最近查询结果；标“旧”表示本次未核实。' 20 322 380 28 9 '#667085'
-$removeCourse = Add-Button $coursePanel '移除选中课程' 402 316 144 32
+$null = Add-Label $coursePanel '新增课程请点右侧“登录 / 添加课程”。' 20 264 380 24 9 '#667085'
+$removeCourse = Add-Button $coursePanel '移除选中课程' 402 256 144 32
 $removeCourse.Anchor = 'Top, Right'
 
 $actions = [System.Windows.Forms.Panel]::new()
-$actions.SetBounds(608, 124, 368, 364)
+$actions.SetBounds(608, 124, 368, 304)
 $actions.Anchor = 'Top, Right'
 $actions.BackColor = [System.Drawing.Color]::White
 $form.Controls.Add($actions)
@@ -129,12 +125,9 @@ $actions.Controls.Add($timePicker)
 $taskLabel = Add-Label $actions '正在读取定时状态…' 20 238 328 22 9 '#667085'
 $scheduleButton = Add-Button $actions '保存 / 启用定时' 20 266 156 30
 $disableButton = Add-Button $actions '关闭定时' 192 266 156 30
-$startupLabel = Add-Label $actions '正在读取自启动状态…' 20 306 328 22 9 '#667085'
-$startupButton = Add-Button $actions '启用开机自启动' 20 330 156 28
-$stopStartupButton = Add-Button $actions '关闭自启动' 192 330 156 28
 
 $logPanel = [System.Windows.Forms.Panel]::new()
-$logPanel.SetBounds(24, 504, 952, 222)
+$logPanel.SetBounds(24, 444, 952, 222)
 $logPanel.Anchor = 'Top, Bottom, Left, Right'
 $logPanel.BackColor = [System.Drawing.Color]::White
 $form.Controls.Add($logPanel)
@@ -158,7 +151,7 @@ $progressBar.SetBounds(20, 210, 912, 4)
 $progressBar.Anchor = 'Bottom, Left, Right'
 $progressBar.MarqueeAnimationSpeed = 25
 $logPanel.Controls.Add($progressBar)
-$footer = Add-Label $form '定时运行需要电脑开机且用户已登录。回退请先关闭助手，再双击“回退第一版.vbs”。' 24 744 952 26 9 '#667085'
+$footer = Add-Label $form '定时运行需要电脑开机且用户已登录。时间使用 Windows 系统时区。' 24 684 952 26 9 '#667085'
 $footer.Anchor = 'Bottom, Left, Right'
 
 function Update-Log {
@@ -179,11 +172,6 @@ function Update-State {
     $config = if (Test-Path -LiteralPath $script:ConfigPath) {
         Get-Content -LiteralPath $script:ConfigPath -Encoding UTF8 -Raw | ConvertFrom-Json
     } else { [PSCustomObject]@{ courses = @() } }
-    $report = $null
-    if (Test-Path -LiteralPath $script:StatusPath) {
-        try { $report = Get-Content -LiteralPath $script:StatusPath -Encoding UTF8 -Raw | ConvertFrom-Json } catch { }
-        $script:LastStatusTime = (Get-Item -LiteralPath $script:StatusPath).LastWriteTimeUtc
-    }
     $courseList.BeginUpdate()
     $courseList.Items.Clear()
     foreach ($url in $config.courses) {
@@ -192,31 +180,14 @@ function Update-State {
             $config.courseNames.PSObject.Properties[$url].Value
         } else { "课程 $id" }
         $item = [System.Windows.Forms.ListViewItem]::new([string]$name)
-        $progress = if ($report -and $report.courses -and $report.courses.PSObject.Properties[$url]) { $report.courses.PSObject.Properties[$url].Value } else { $null }
-        $counts = if ($progress -and $null -ne $progress.count -and $null -ne $progress.total) {
-            "$($progress.count) / $($progress.total)" + $(if ($progress.status -eq 'failed' -or $report.loginExpired) { ' 旧' } else { '' })
-        } elseif ($progress) { '暂不可用' } else { '待查询' }
-        $null = $item.SubItems.Add($counts)
         $null = $item.SubItems.Add($id)
-        if ($progress) {
-            $checked = try { ([DateTimeOffset]::Parse($progress.checkedAt)).ToOffset([TimeSpan]::FromHours(8)).ToString('yyyy-MM-dd HH:mm:ss') } catch { '未知' }
-            $item.ToolTipText = "最近查询（北京时间）：$checked`r`n$($progress.countError)"
-        }
         $item.Tag = $url
         $null = $courseList.Items.Add($item)
     }
     $courseList.EndUpdate()
     $ready = (Test-Path -LiteralPath $script:AuthPath) -and $courseList.Items.Count -gt 0
     $accountLabel.Text = if ($ready) { "已保存登录状态 · 共 $($courseList.Items.Count) 门课程" } else { '请先登录并添加需要签到的课程' }
-    $accountLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#667085')
-    $statusLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#A7F3D0')
     $busy = $null -ne $script:Worker
-    if ($report -and $report.loginExpired) {
-        $accountLabel.Text = '登录已失效 · 请点击“登录 / 添加课程”'
-        $accountLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#B42318')
-        $statusLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#FDA29B')
-        if (-not $busy) { $statusLabel.Text = '登录已失效，请重新登录' }
-    }
     $runButton.Enabled = $ready -and -not $busy
     $setupButton.Enabled = -not $busy
     $scheduleButton.Enabled = $ready -and -not $busy
@@ -232,25 +203,13 @@ function Update-State {
         } elseif ($ownedTask) {
             $boundary = $task.Triggers[0].StartBoundary
             $clock = if ($boundary) { ([DateTime]::Parse($boundary)).ToString('HH:mm') } else { '已设置' }
-            $taskLabel.Text = if ($task.State -eq 'Disabled') { "每日定时已暂停 · $clock" } else { "已启用每日定时 · $clock" }
+            $taskLabel.Text = "已启用每日定时 · $clock"
             if ($boundary -and -not $busy) { $timePicker.Value = [DateTime]::Parse($boundary) }
         } else { $taskLabel.Text = '未启用每日定时' }
         $disableButton.Enabled = $ownedTask -and -not $busy
     } catch {
         $taskLabel.Text = '暂时无法读取定时任务状态'
         $disableButton.Enabled = -not $busy
-    }
-    try {
-        $startup = Get-ScheduledTask -TaskName 'UoocCheckinStartup' -ErrorAction SilentlyContinue
-        $startupArgument = '"{0}"' -f (Join-Path $script:Root 'launch.vbs')
-        $ownedStartup = $startup -and @($startup.Actions | Where-Object { $_.Arguments -eq $startupArgument }).Count -gt 0
-        $startupLabel.Text = if ($ownedStartup -and $startup.State -eq 'Disabled') { '开机自启动已暂停' } elseif ($ownedStartup) { '已启用 · 登录 Windows 后打开助手' } elseif ($startup) { '另一个目录已设置自启动' } else { '未启用开机自启动' }
-        $startupButton.Enabled = -not $busy -and (-not $startup -or ($ownedStartup -and $startup.State -eq 'Disabled'))
-        $stopStartupButton.Enabled = -not $busy -and $ownedStartup
-    } catch {
-        $startupLabel.Text = '暂时无法读取自启动状态'
-        $startupButton.Enabled = -not $busy
-        $stopStartupButton.Enabled = $false
     }
     if (Test-Path -LiteralPath $script:ConfigPath) { $script:LastConfigTime = (Get-Item -LiteralPath $script:ConfigPath).LastWriteTimeUtc }
 }
@@ -278,8 +237,6 @@ function Start-Action([string]$Mode) {
         'setup' { '请在 Edge 中登录并进入课程' }
         'install-task' { '正在保存每日定时…' }
         'remove-task' { '正在关闭每日定时…' }
-        'install-startup' { '正在启用开机自启动…' }
-        'remove-startup' { '正在关闭开机自启动…' }
     }
     $progressBar.Style = 'Marquee'
     Update-State
@@ -289,8 +246,6 @@ $runButton.Add_Click({ try { Start-Action 'run' } catch { [System.Windows.Forms.
 $setupButton.Add_Click({ try { Start-Action 'setup' } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, '无法启动') } })
 $scheduleButton.Add_Click({ try { Start-Action 'install-task' } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, '设置失败') } })
 $disableButton.Add_Click({ try { Start-Action 'remove-task' } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, '设置失败') } })
-$startupButton.Add_Click({ try { Start-Action 'install-startup' } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, '设置失败') } })
-$stopStartupButton.Add_Click({ try { Start-Action 'remove-startup' } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, '设置失败') } })
 $logButton.Add_Click({
     if (Test-Path -LiteralPath $script:LogPath) { Start-Process -FilePath notepad.exe -ArgumentList ('"{0}"' -f $script:LogPath) -WindowStyle Normal }
 })
@@ -311,7 +266,6 @@ $timer.Interval = 500
 $timer.Add_Tick({
     Update-Log
     if ((Test-Path -LiteralPath $script:ConfigPath) -and (Get-Item -LiteralPath $script:ConfigPath).LastWriteTimeUtc -ne $script:LastConfigTime) { Update-State }
-    if ((Test-Path -LiteralPath $script:StatusPath) -and (Get-Item -LiteralPath $script:StatusPath).LastWriteTimeUtc -ne $script:LastStatusTime) { Update-State }
     if ($script:Worker -and $script:Worker.Process.HasExited) {
         $worker = $script:Worker
         $worker.Process.WaitForExit()
@@ -322,19 +276,15 @@ $timer.Add_Tick({
         $script:Worker = $null
         $progressBar.Style = 'Blocks'
         $progressBar.Value = if ($exitCode -eq 0) { 100 } else { 0 }
-        $statusLabel.Text = if ($exitCode -eq 2) { '登录已失效，请重新登录' } elseif ($exitCode -ne 0) { '未完成，请查看活动记录' } else {
+        $statusLabel.Text = if ($exitCode -ne 0) { '未完成，请查看活动记录' } else {
             switch ($worker.Mode) {
                 'run' { '签到完成，全部课程已核实' }
                 'setup' { '课程和登录状态已保存' }
                 'install-task' { '每日定时已保存' }
                 'remove-task' { '每日定时已关闭' }
-                'install-startup' { '开机自启动已启用' }
-                'remove-startup' { '开机自启动已关闭' }
             }
         }
-        if ($exitCode -eq 2) {
-            [System.Windows.Forms.MessageBox]::Show('登录已失效。请点击“登录 / 添加课程”重新登录，然后再点击“立即签到”。', '需要重新登录', 'OK', 'Warning') | Out-Null
-        } elseif ($exitCode -ne 0 -and $errorText.Trim()) {
+        if ($exitCode -ne 0 -and $errorText.Trim()) {
             [System.Windows.Forms.MessageBox]::Show($errorText.Substring(0, [Math]::Min(700, $errorText.Length)), '操作未完成') | Out-Null
         }
         Update-State
@@ -363,7 +313,6 @@ try {
         if ($runButton.Enabled -ne ((Test-Path -LiteralPath $script:AuthPath) -and $courseList.Items.Count -gt 0)) { throw 'Run button readiness does not match saved state.' }
         if (-not $runButton.Enabled -and ($scheduleButton.Enabled -or -not $setupButton.Enabled)) { throw 'First launch must allow setup and keep scheduling disabled until configured.' }
         if ($logBox.Text.Length -eq 0) { throw 'Activity panel is empty.' }
-        if ($SelfTestCheck) { & $SelfTestCheck }
         if ($PreviewPath) {
             $form.Show()
             [System.Windows.Forms.Application]::DoEvents()

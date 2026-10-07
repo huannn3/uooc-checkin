@@ -1,12 +1,13 @@
 param(
-    [ValidateSet('login', 'setup', 'run', 'test', 'install-task', 'remove-task')]
+    [ValidateSet('login', 'setup', 'run', 'test', 'install-task', 'remove-task', 'install-startup', 'remove-startup')]
     [string]$Mode = 'run',
     [string]$At = '08:00',
-    [switch]$Visible
+    [switch]$Visible,
+    [switch]$NotifyOnLoginExpiry
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-$taskName = 'UoocDailyCheckin'
+$taskName = if ($Mode -in @('install-startup', 'remove-startup')) { 'UoocCheckinStartup' } else { 'UoocDailyCheckin' }
 $nodePath = Join-Path $PSScriptRoot 'runtime\node.exe'
 if (-not (Test-Path -LiteralPath $nodePath)) {
     $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
@@ -17,9 +18,10 @@ if (-not (Test-Path -LiteralPath $nodePath)) {
 if (-not (Test-Path -LiteralPath $nodePath)) { throw 'Node.js was not found. Install Node.js 20 or newer.' }
 $scriptPath = Join-Path $PSScriptRoot 'uooc.js'
 $launcherPath = Join-Path $PSScriptRoot 'launch.vbs'
-$existingTask = if ($Mode -in @('install-task', 'remove-task')) { Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue }
+$existingTask = if ($Mode -in @('install-task', 'remove-task', 'install-startup', 'remove-startup')) { Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue }
 if ($existingTask) {
     $ownedArguments = @(('"{0}" run' -f $scriptPath), ('"{0}" run' -f $launcherPath))
+    if ($Mode -in @('install-startup', 'remove-startup')) { $ownedArguments = @(('"{0}"' -f $launcherPath)) }
     if (-not @($existingTask.Actions | Where-Object { $_.Arguments -in $ownedArguments }).Count) {
         throw 'This task name belongs to another project. It will not be changed.'
     }
@@ -38,16 +40,42 @@ if ($Mode -eq 'install-task') {
     # Only an existing task with this workspace's exact command may be updated.
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "Uooc daily check-in: $PSScriptRoot" -Force | Out-Null
     Write-Host "Installed $taskName at $At (Windows local time). The PC must be on and this user signed in."
-} elseif ($Mode -eq 'remove-task') {
+} elseif ($Mode -eq 'install-startup') {
+    $action = New-ScheduledTaskAction -Execute (Join-Path $env:WINDIR 'System32\wscript.exe') -Argument ('"{0}"' -f $launcherPath) -WorkingDirectory $PSScriptRoot
+    $userId = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $userId
+    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
+    $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Limited
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "Uooc assistant startup: $PSScriptRoot" -Force | Out-Null
+    Write-Host "Installed $taskName. Opens the assistant after this user signs in to Windows."
+} elseif ($Mode -in @('remove-task', 'remove-startup')) {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
     Write-Host "Removed $taskName."
 } elseif ($Mode -eq 'test') {
     & $nodePath (Join-Path $PSScriptRoot 'test.js')
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & (Join-Path $PSScriptRoot 'test-run.ps1')
+    & (Join-Path $PSScriptRoot 'test-ui.ps1')
 } else {
-    $nodeArgs = @($scriptPath, $Mode)
-    if ($Visible) { $nodeArgs += '--visible' }
-    & $nodePath @nodeArgs
-    exit $LASTEXITCODE
+    $hash = [System.Security.Cryptography.SHA256]::Create()
+    $instanceId = [BitConverter]::ToString($hash.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($PSScriptRoot))).Replace('-', '')
+    $hash.Dispose()
+    $workMutex = [System.Threading.Mutex]::new($false, ('Local\UoocCheckinWork_' + $instanceId))
+    $acquired = $false
+    try {
+        try { $acquired = $workMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $acquired = $true }
+        if (-not $acquired) { throw 'Another Uooc login or check-in is still running. Try again after it finishes.' }
+        $nodeArgs = @($scriptPath, $Mode)
+        if ($Visible) { $nodeArgs += '--visible' }
+        & $nodePath @nodeArgs
+        $exitCode = $LASTEXITCODE
+    } finally {
+        if ($acquired) { $workMutex.ReleaseMutex() }
+        $workMutex.Dispose()
+    }
+    if ($exitCode -eq 2 -and $NotifyOnLoginExpiry) {
+        $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        Start-Process -FilePath $powershell -ArgumentList ('-NoProfile -STA -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $PSScriptRoot 'notify.ps1')) -WindowStyle Hidden
+    }
+    exit $exitCode
 }

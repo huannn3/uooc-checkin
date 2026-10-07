@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { courseUrl, visitCourse, signinResult, signinCounts, checkLogin, siteState, playwright } = require('./uooc');
+const { courseUrl, visitCourse, signinResult, siteState, playwright } = require('./uooc');
 
 async function main() {
   const state = siteState({
@@ -54,8 +54,7 @@ async function main() {
       request: { get: async (url, options) => {
         assert.equal(new URL(url).pathname, '/home/course/progress');
         assert.equal(options.params.cid, '123');
-        if (progress instanceof Error) throw progress;
-        return progress && progress.json ? progress : response({ code: 1, data: progress });
+        return response({ code: 1, data: progress });
       } },
     };
   }
@@ -70,30 +69,7 @@ async function main() {
   assert.equal(signinResult({}, { signin_cnt: '30', signin_total: '30', signin_time: '2020-01-01' }, today).status, 'complete');
   assert.throws(() => signinResult({}, { signin_time: '2020-01-01', signin_cnt: '1', signin_total: '30' }, today), /未确认今日签到/);
   assert.throws(() => signinResult({}, { signin_total: '0' }, today), /未确认今日签到/);
-  await assert.rejects(visitCourse(pageFor(response({ code: 401 })), url), error => error.code === 'LOGIN_EXPIRED');
-  await assert.rejects(visitCourse(pageFor(response({}, 401)), url), error => error.code === 'LOGIN_EXPIRED');
-  assert.deepEqual(signinCounts({ signin_cnt: '3', signin_total: '30' }), { count: 3, total: 30 });
-  assert.deepEqual(signinCounts({ signin_cnt: '0', signin_total: '0' }), { count: 0, total: 0 });
-  for (const value of [null, '', -1, 'abc', 1.5]) {
-    assert.deepEqual(signinCounts({ signin_cnt: value, signin_total: '30' }), {});
-  }
-  const counted = await visitCourse(pageFor(response({ code: 1, data: { is_sign: 1 } }), true,
-    { signin_cnt: '3', signin_total: '30' }), url);
-  assert.equal(counted.count, 3);
-  assert.equal(counted.total, 30);
-  const countFailed = await visitCourse(pageFor(response({ code: 1, data: { is_sign: 1 } }), true, new Error('network')), url);
-  assert.equal(countFailed.status, 'signed');
-  assert.equal(countFailed.countError, 'network');
-  const countExpired = await visitCourse(pageFor(response({ code: 1, data: { is_sign: 1 } }), true, response({ code: 401 })), url);
-  assert.equal(countExpired.status, 'signed');
-  assert.equal(countExpired.loginExpired, true);
-  const redirected = pageFor(response({ code: 1 }));
-  redirected.url = () => 'https://www.uooc.net.cn/index/login';
-  await assert.rejects(visitCourse(redirected, url), error => error.code === 'LOGIN_EXPIRED');
-  for (const data of [{ code: 401 }, { code: 0, msg: '请先登陆' }]) {
-    await assert.rejects(checkLogin({ get: async () => response(data) }, 'https://www.uooc.net.cn'), error => error.code === 'LOGIN_EXPIRED');
-  }
-  await assert.rejects(checkLogin({ get: async () => { throw new Error('network'); } }, 'https://www.uooc.net.cn'), error => error.code !== 'LOGIN_EXPIRED');
+  await assert.rejects(visitCourse(pageFor(response({ code: 401 })), url), /登录已过期/);
   await assert.rejects(visitCourse(pageFor(response({ code: 0, msg: '失败' })), url), /未返回成功/);
   await assert.rejects(visitCourse(pageFor(response({ code: 1 }, 500)), url), /HTTP 500/);
   await assert.rejects(visitCourse(pageFor(new Error('timeout')), url), /未收到课程信息响应/);
@@ -101,7 +77,6 @@ async function main() {
   const nonJSON = { ...response({}), json: async () => { throw new Error('not JSON'); } };
   await assert.rejects(visitCourse(pageFor(nonJSON), url), /非 JSON/);
   console.log('通过：课程地址校验、响应监听顺序、成功、登录过期、错误返回和超时处理。');
-  require('./test-state')();
   if (process.argv.includes('--browser')) {
     const browser = await playwright().chromium.launch({ channel: 'msedge', headless: true, chromiumSandbox: true });
     try {

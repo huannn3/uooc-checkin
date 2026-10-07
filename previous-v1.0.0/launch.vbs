@@ -9,7 +9,7 @@ If WScript.Arguments.Count > 0 Then
     scriptFile = root & "\run.ps1"
 End If
 command = """" & shell.ExpandEnvironmentStrings("%WINDIR%") & "\System32\WindowsPowerShell\v1.0\powershell.exe"" -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File """ & scriptFile & """"
-If WScript.Arguments.Count > 0 Then command = command & " run -NotifyOnLoginExpiry"
+If WScript.Arguments.Count > 0 Then command = command & " run"
 If WScript.Arguments.Count > 0 Then
     WScript.Quit shell.Run(command, 0, True)
 Else
