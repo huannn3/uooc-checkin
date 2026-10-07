@@ -1,5 +1,13 @@
 # Uooc 自动签到
 
+## v1.0.0 朋友测试版
+
+便携测试包适用于 64 位 Windows 10/11，附带 Node.js 和 Playwright，电脑需已安装 Microsoft Edge。无需安装 Codex、Node.js 或运行 npm。
+
+将压缩包完整解压到固定目录，双击 `launch.vbs`。先点“登录 / 添加课程”，在 Edge 中自行登录、完成验证码并逐个进入课程，保存成功后关闭配置用的 Edge 窗口。然后点击“立即签到”，成功后再按需启用每日定时。详细步骤见 `快速开始.txt`。
+
+分发包不含任何个人登录状态、课程配置、浏览器数据或日志。首次打开不会自动启用定时任务；启用后请勿移动或删除程序目录，需要移动时先关闭定时，移动完成后重新启用。反馈问题时提供版本、Windows/Edge 版本和错误提示，勿发送登录状态文件或浏览器数据。
+
 每天用 Edge 进入配置的课程页面，等待网站课程信息接口返回，并根据 `is_sign` 和成绩接口的 `signin_time` 核实签到。支持多门课程，登录过期和无法确认签到都会报错，日志在 `uooc.log`。
 
 Uooc [官方帮助](https://www.uooc.net.cn/misc/support)说明：登录学习界面会自动签到，每天一次；达到老师设定的满分次数后不再增加。本脚本只进入课程首页，不操作视频、测验或讨论。
@@ -80,10 +88,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1 remove-task
 
 ## 环境与验证
 
-需要 Edge、Node.js 20+ 和 Playwright。这台电脑已有 Codex 提供的 Node.js 和 Playwright，`run.ps1` 会自动使用。复制到其他电脑时，安装 Node.js 后在此目录执行 `npm install`（使用已安装的 Edge，无需下载 Chromium）。
+需要 Edge、Node.js 20+ 和 Playwright。便携测试包已附带运行环境，`run.ps1` 优先使用包内 `runtime/node.exe`。源码目录也支持系统 Node.js 和这台电脑 Codex 提供的运行时。仅复制源码到其他电脑时，安装 Node.js 后在此目录执行 `npm install`（使用已安装的 Edge，无需下载 Chromium）。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1 test
 ```
 
-测试检查错误地址、响应监听顺序和失败处理。实际账户的签到结果需要首次登录后验证；平台更新接口或页面流程时，脚本会报错而不会自行声称成功。
+测试检查错误地址、响应监听顺序、失败处理，以及含中文的 UTF-8 配置和定时任务脚本输出编码。定时任务测试使用模拟接口，不会创建真实任务。实际账户的签到结果需要首次登录后验证；平台更新接口或页面流程时，脚本会报错而不会自行声称成功。

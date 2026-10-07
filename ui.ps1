@@ -196,13 +196,17 @@ function Update-State {
     $timePicker.Enabled = -not $busy
     try {
         $task = Get-ScheduledTask -TaskName $script:TaskName -ErrorAction SilentlyContinue
-        if ($task) {
+        $ownedArguments = @(('"{0}" run' -f (Join-Path $script:Root 'uooc.js')), ('"{0}" run' -f (Join-Path $script:Root 'launch.vbs')))
+        $ownedTask = $task -and @($task.Actions | Where-Object { $_.Arguments -in $ownedArguments }).Count -gt 0
+        if ($task -and -not $ownedTask) {
+            $taskLabel.Text = '另一个目录已设置定时，请在原目录管理'
+        } elseif ($ownedTask) {
             $boundary = $task.Triggers[0].StartBoundary
             $clock = if ($boundary) { ([DateTime]::Parse($boundary)).ToString('HH:mm') } else { '已设置' }
             $taskLabel.Text = "已启用每日定时 · $clock"
             if ($boundary -and -not $busy) { $timePicker.Value = [DateTime]::Parse($boundary) }
         } else { $taskLabel.Text = '未启用每日定时' }
-        $disableButton.Enabled = $null -ne $task -and -not $busy
+        $disableButton.Enabled = $ownedTask -and -not $busy
     } catch {
         $taskLabel.Text = '暂时无法读取定时任务状态'
         $disableButton.Enabled = -not $busy
@@ -302,9 +306,12 @@ try {
     Update-State
     Update-Log
     if ($SelfTest) {
-        $config = Get-Content -LiteralPath $script:ConfigPath -Encoding UTF8 -Raw | ConvertFrom-Json
+        $config = if (Test-Path -LiteralPath $script:ConfigPath) {
+            Get-Content -LiteralPath $script:ConfigPath -Encoding UTF8 -Raw | ConvertFrom-Json
+        } else { [PSCustomObject]@{ courses = @() } }
         if ($courseList.Items.Count -ne @($config.courses).Count) { throw 'Course list did not load saved configuration.' }
         if ($runButton.Enabled -ne ((Test-Path -LiteralPath $script:AuthPath) -and $courseList.Items.Count -gt 0)) { throw 'Run button readiness does not match saved state.' }
+        if (-not $runButton.Enabled -and ($scheduleButton.Enabled -or -not $setupButton.Enabled)) { throw 'First launch must allow setup and keep scheduling disabled until configured.' }
         if ($logBox.Text.Length -eq 0) { throw 'Activity panel is empty.' }
         if ($PreviewPath) {
             $form.Show()

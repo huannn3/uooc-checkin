@@ -21,6 +21,8 @@ research/
 .next/
 dist/
 build/
+release/
+runtime/
 cache/
 .cache/
 coverage/

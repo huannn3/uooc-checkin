@@ -5,10 +5,14 @@ param(
     [switch]$Visible
 )
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $taskName = 'UoocDailyCheckin'
-$nodeCommand = Get-Command node -ErrorAction SilentlyContinue
-$nodePath = if ($nodeCommand) { $nodeCommand.Source } else {
-    Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
+$nodePath = Join-Path $PSScriptRoot 'runtime\node.exe'
+if (-not (Test-Path -LiteralPath $nodePath)) {
+    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+    $nodePath = if ($nodeCommand) { $nodeCommand.Source } else {
+        Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
+    }
 }
 if (-not (Test-Path -LiteralPath $nodePath)) { throw 'Node.js was not found. Install Node.js 20 or newer.' }
 $scriptPath = Join-Path $PSScriptRoot 'uooc.js'
@@ -22,7 +26,7 @@ if ($existingTask) {
 }
 if ($Mode -eq 'install-task') {
     if ($At -notmatch '^([01]\d|2[0-3]):[0-5]\d$') { throw 'Use HH:mm, for example 08:00.' }
-    $courses = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'config.json') -Raw | ConvertFrom-Json).courses
+    $courses = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'config.json') -Encoding UTF8 -Raw | ConvertFrom-Json).courses
     if (-not $courses -or -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot '.uooc-auth.json'))) {
         throw 'Run setup first and visit your courses.'
     }
@@ -39,7 +43,8 @@ if ($Mode -eq 'install-task') {
     Write-Host "Removed $taskName."
 } elseif ($Mode -eq 'test') {
     & $nodePath (Join-Path $PSScriptRoot 'test.js')
-    exit $LASTEXITCODE
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & (Join-Path $PSScriptRoot 'test-run.ps1')
 } else {
     $nodeArgs = @($scriptPath, $Mode)
     if ($Visible) { $nodeArgs += '--visible' }
