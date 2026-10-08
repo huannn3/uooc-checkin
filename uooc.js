@@ -43,9 +43,21 @@ function log(message) {
   fs.appendFileSync(path.join(ROOT, 'uooc.log'), line, 'utf8');
 }
 
-function saveStatus(value) {
-  fs.writeFileSync(STATUS + '.tmp', JSON.stringify(value, null, 2) + '\n', 'utf8');
-  fs.renameSync(STATUS + '.tmp', STATUS);
+async function saveStatus(value, file = STATUS) {
+  const json = JSON.stringify(value, null, 2) + '\n';
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      fs.writeFileSync(file + '.tmp', json, 'utf8');
+      fs.renameSync(file + '.tmp', file);
+      return true;
+    } catch (error) {
+      if (!['EBUSY', 'EPERM', 'EACCES'].includes(error.code) || attempt === 5) {
+        log(`显示缓存暂未保存（${error.code || '未知错误'}），签到核实仍继续；请查看活动记录。`);
+        return false;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50 * 2 ** attempt));
+    }
+  }
 }
 
 function readStatus() {
@@ -144,7 +156,7 @@ async function responseData(response) {
   return data.data || {};
 }
 
-async function visitCourse(page, url, timeout = 30000) {
+async function visitCourse(page, url, timeout = 30000, previous = {}) {
   const cid = new URL(url).pathname.match(/\d+\/?$/)[0].replace(/\/$/, '');
   // 当前页面通过 /home/course/info 的 is_sign 字段返回签到结果。
   // 必须先监听再进入页面，响应可能早于页面加载完成。
@@ -161,19 +173,37 @@ async function visitCourse(page, url, timeout = 30000) {
   if (!response) throw new Error('未收到课程信息响应，请检查页面是否正常加载。');
   const info = await responseData(response);
   const title = info.parent_name || info.name || info.course_name || `课程 ${cid}`;
+  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+  const previousDay = previous.checkedAt ? new Date(previous.checkedAt).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }) : '';
   // 成绩提供次数；新签到已确认时，次数查询失败不能抹掉签到结果。
   let progress;
+  let countPending = false;
   try {
-    progress = await responseData(await page.request.get(new URL('/home/course/progress', url).href, {
-      params: { cid }, timeout,
-    }));
+    // 网站的新签到标记可能早于成绩次数更新，等待当天记录及计数一起同步。
+    for (let attempt = 0; attempt < 6; attempt++) {
+      progress = await responseData(await page.request.get(new URL('/home/course/progress', url).href, {
+        params: { cid, _: Date.now() }, headers: { 'Cache-Control': 'no-cache' }, timeout,
+      }));
+      const counts = signinCounts(progress);
+      const atTarget = counts.total > 0 && counts.count >= counts.total;
+      const expectIncrease = previousDay && previousDay < today && Number.isSafeInteger(previous.count)
+        && previous.total === counts.total && previous.count < counts.total;
+      const fresh = String(progress.signin_time || '').slice(0, 10) === today
+        && (!expectIncrease || counts.count > previous.count);
+      countPending = String(info.is_sign) === '1' && counts.count !== undefined && !atTarget && !fresh;
+      if (!countPending || attempt === 5) break;
+      await page.waitForTimeout(500 * 2 ** attempt);
+    }
   } catch (error) {
     if (String(info.is_sign) !== '1') throw error;
     return { status: 'signed', title, countError: error.message, loginExpired: error.code === 'LOGIN_EXPIRED' };
   }
-  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
   const counts = signinCounts(progress);
   const result = { ...signinResult(info, progress, today), ...counts, title };
+  if (countPending) {
+    result.countPending = true;
+    result.countError = '签到已确认，网站成绩次数尚待同步；当前显示旧次数，不自行加一。';
+  }
   if (counts.count === undefined) {
     delete result.count;
     delete result.total;
@@ -191,7 +221,7 @@ async function main() {
   const setup = mode === 'setup' || mode === 'login';
   if (!setup && (!courses.length || !fs.existsSync(AUTH))) {
     if (courses.length) {
-      saveStatus({ ...readStatus(), loginExpired: true, updatedAt: new Date().toISOString() });
+      await saveStatus({ ...readStatus(), loginExpired: true, updatedAt: new Date().toISOString() });
       throw loginError();
     }
     throw new Error('请先运行 setup，在浏览器中登录并逐个进入需要签到的课程。');
@@ -218,7 +248,7 @@ async function main() {
           savedLogin = true;
           // 清除旧的失效提示，保留此前的课程次数。
           const previous = readStatus();
-          saveStatus({ ...previous, loginExpired: false, updatedAt: new Date().toISOString() });
+          await saveStatus({ ...previous, loginExpired: false, updatedAt: new Date().toISOString() });
         })().catch(() => {}).finally(() => { savePending = false; });
       };
       let finish;
@@ -262,7 +292,7 @@ async function main() {
           for (const url of courses) {
             report.courses[url] = { ...report.courses[url], status: 'failed', countError: error.message, lastAttemptAt: new Date().toISOString() };
           }
-          saveStatus(report);
+          await saveStatus(report);
           throw error;
         }
       }
@@ -270,14 +300,14 @@ async function main() {
       for (const url of courses) {
         const page = await context.newPage();
         try {
-          const result = await visitCourse(page, url);
+          const result = await visitCourse(page, url, 30000, report.courses[url]);
           const label = { signed: '今日签到成功', already: '今日已签到', complete: '签到次数已满' }[result.status];
-          const counts = result.count === undefined ? '；签到次数暂不可用' : `；签到次数 ${result.count}/${result.total}`;
+          const counts = result.count === undefined ? '；签到次数暂不可用' : `；签到次数 ${result.count}/${result.total}${result.countPending ? '（待同步）' : ''}`;
           log(`${label}：${result.title}（${url}）${counts}`);
           if (result.countError) log(`次数查询提示：${result.countError}`);
           successes++;
           report.courses[url] = { status: result.status, count: result.count ?? null, total: result.total ?? null,
-            countError: result.countError || '', checkedAt: new Date().toISOString() };
+            countError: result.countError || '', countPending: Boolean(result.countPending), checkedAt: new Date().toISOString() };
           report.loginExpired = Boolean(result.loginExpired);
           saveCourses(courses, { [url]: result.title });
           if (!report.loginExpired) fs.writeFileSync(AUTH, JSON.stringify(siteState(await context.storageState({ indexedDB: true }))), 'utf8');
@@ -289,7 +319,7 @@ async function main() {
           report.courses[url] = { ...report.courses[url], status: 'failed', countError: error.message, lastAttemptAt: new Date().toISOString() };
         } finally { await page.close(); }
         report.updatedAt = new Date().toISOString();
-        saveStatus(report);
+        await saveStatus(report);
         if (report.loginExpired) break;
       }
       log(`运行完成：成功 ${successes}，失败 ${failures}，未处理 ${courses.length - successes - failures}。签到次数以成绩页为准。`);
@@ -298,7 +328,7 @@ async function main() {
   } finally { await browser.close(); }
 }
 
-module.exports = { courseUrl, readCourses, visitCourse, signinResult, signinCounts, checkLogin, siteState, playwright };
+module.exports = { courseUrl, readCourses, visitCourse, signinResult, signinCounts, checkLogin, saveStatus, siteState, playwright };
 if (require.main === module) main().catch(error => {
   log(`错误：${error.message}`);
   process.exitCode = error.code === 'LOGIN_EXPIRED' ? 2 : 1;

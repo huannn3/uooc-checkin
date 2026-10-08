@@ -1,6 +1,6 @@
 {
   "name": "uooc-checkin",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "scripts": {
     "setup": "node uooc.js setup",

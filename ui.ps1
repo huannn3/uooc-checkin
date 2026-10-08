@@ -8,6 +8,7 @@ $script:Worker = $null
 $script:LastLog = ''
 $script:LastConfigTime = $null
 $script:LastStatusTime = $null
+$script:LastStatusReport = $null
 $script:Root = $PSScriptRoot
 $script:ConfigPath = Join-Path $PSScriptRoot 'config.json'
 $script:AuthPath = Join-Path $PSScriptRoot '.uooc-auth.json'
@@ -59,7 +60,7 @@ function Add-Button($Parent, $Text, $X, $Y, $Width, $Height, $Primary = $false) 
 }
 
 $form = [System.Windows.Forms.Form]::new()
-$form.Text = 'Uooc 签到助手 v1.1.0'
+$form.Text = 'Uooc 签到助手 v1.1.1'
 $form.ClientSize = [System.Drawing.Size]::new(1000, 780)
 $form.MinimumSize = [System.Drawing.Size]::new(1016, 819)
 $form.StartPosition = 'CenterScreen'
@@ -102,7 +103,7 @@ $null = $courseList.Columns.Add('已签 / 满分需', 112)
 $null = $courseList.Columns.Add('课程周期 ID', 150)
 $courseList.ShowItemToolTips = $true
 $coursePanel.Controls.Add($courseList)
-$null = Add-Label $coursePanel '次数为最近查询结果；标“旧”表示本次未核实。' 20 322 380 28 9 '#667085'
+$null = Add-Label $coursePanel '次数为最近结果；“待同步”表示网站尚未更新。' 20 322 380 28 9 '#667085'
 $removeCourse = Add-Button $coursePanel '移除选中课程' 402 316 144 32
 $removeCourse.Anchor = 'Top, Right'
 
@@ -175,14 +176,31 @@ function Update-Log {
     } catch { }
 }
 
+function Read-Status {
+    $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+    $stream = [System.IO.File]::Open($script:StatusPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)
+    $reader = $null
+    try {
+        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8, $true)
+        return ($reader.ReadToEnd() | ConvertFrom-Json)
+    } finally {
+        if ($reader) { $reader.Dispose() } else { $stream.Dispose() }
+    }
+}
+
 function Update-State {
     $config = if (Test-Path -LiteralPath $script:ConfigPath) {
         Get-Content -LiteralPath $script:ConfigPath -Encoding UTF8 -Raw | ConvertFrom-Json
     } else { [PSCustomObject]@{ courses = @() } }
-    $report = $null
+    $report = $script:LastStatusReport
     if (Test-Path -LiteralPath $script:StatusPath) {
-        try { $report = Get-Content -LiteralPath $script:StatusPath -Encoding UTF8 -Raw | ConvertFrom-Json } catch { }
-        $script:LastStatusTime = (Get-Item -LiteralPath $script:StatusPath).LastWriteTimeUtc
+        try {
+            # Read the timestamp first so a replacement during reading is retried on the next tick.
+            $statusTime = (Get-Item -LiteralPath $script:StatusPath).LastWriteTimeUtc
+            $report = Read-Status
+            $script:LastStatusReport = $report
+            $script:LastStatusTime = $statusTime
+        } catch { }
     }
     $courseList.BeginUpdate()
     $courseList.Items.Clear()
@@ -194,7 +212,7 @@ function Update-State {
         $item = [System.Windows.Forms.ListViewItem]::new([string]$name)
         $progress = if ($report -and $report.courses -and $report.courses.PSObject.Properties[$url]) { $report.courses.PSObject.Properties[$url].Value } else { $null }
         $counts = if ($progress -and $null -ne $progress.count -and $null -ne $progress.total) {
-            "$($progress.count) / $($progress.total)" + $(if ($progress.status -eq 'failed' -or $report.loginExpired) { ' 旧' } else { '' })
+            "$($progress.count) / $($progress.total)" + $(if ($progress.countPending) { ' 待同步' } elseif ($progress.status -eq 'failed' -or $report.loginExpired) { ' 旧' } else { '' })
         } elseif ($progress) { '暂不可用' } else { '待查询' }
         $null = $item.SubItems.Add($counts)
         $null = $item.SubItems.Add($id)

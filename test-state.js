@@ -15,35 +15,50 @@ module.exports = function testState() {
     fs.writeFileSync(path.join(root, 'config.json'), JSON.stringify({ courses: [url], customField: 'preserve' }));
     fs.writeFileSync(path.join(moduleRoot, 'index.js'), `
       const response = data => ({ ok: () => true, status: () => 200, json: async () => data });
+      const fs = require('node:fs');
+      if (process.env.UOOC_TEST_CASE === 'cache-busy') fs.renameSync = () => { throw Object.assign(new Error('fixture busy'), { code: 'EBUSY' }); };
+      let queries = 0;
+      const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
       const request = { get: async url => {
         if (process.env.UOOC_TEST_CASE === 'network') throw new Error('fixture network failure');
         if (url.includes('/member/user')) return response({ code: process.env.UOOC_TEST_CASE === 'expired' ? 401 : 1 });
         if (process.env.UOOC_TEST_CASE === 'count-failed') throw new Error('fixture count query failed');
-        return response({ code: 1, data: { signin_cnt: '3', signin_total: '30' } });
+        const delayed = process.env.UOOC_TEST_CASE === 'delayed' && ++queries === 1;
+        return response({ code: 1, data: { signin_cnt: delayed ? '2' : '3', signin_total: '30', signin_time: delayed ? '2000-01-01' : today } });
       } };
       const context = { request, newPage: async () => ({ request,
         waitForResponse: async () => response({ code: 1, data: { is_sign: 1, name: 'fixture course' } }),
-        goto: async () => ({ ok: () => true }), close: async () => {} }),
+        goto: async () => ({ ok: () => true }), close: async () => {}, waitForTimeout: async () => {} }),
         storageState: async () => ({ cookies: [{ domain: '.uooc.net.cn', name: 'fixture', value: 'refreshed' }], origins: [] }) };
       exports.chromium = { launch: async () => ({ newContext: async () => context, close: async () => {} }) };
     `);
-    for (const scenario of ['expired', 'network', 'success', 'count-failed']) {
+    for (const scenario of ['expired', 'network', 'success', 'count-failed', 'delayed', 'cache-busy']) {
       fs.writeFileSync(path.join(root, '.uooc-auth.json'), auth);
       fs.rmSync(path.join(root, '.uooc-status.json'), { force: true });
+      fs.writeFileSync(path.join(root, 'config.json'), JSON.stringify({ courses: scenario === 'cache-busy' ? [url, 'https://www.uooc.net.cn/home/course/456'] : [url], customField: 'preserve' }));
+      const oldState = { courses: { [url]: { count: 2, total: 30, checkedAt: '2000-01-01T00:00:00Z' } } };
+      if (['delayed', 'cache-busy'].includes(scenario)) fs.writeFileSync(path.join(root, '.uooc-status.json'), JSON.stringify(oldState));
       const child = spawnSync(process.execPath, [path.join(root, 'uooc.js'), 'run'], {
         env: { ...process.env, UOOC_TEST_CASE: scenario }, encoding: 'utf8', timeout: 10000,
       });
       assert.ifError(child.error);
       assert.equal(child.status, scenario === 'expired' ? 2 : scenario === 'network' ? 1 : 0, child.stdout + child.stderr);
       const state = JSON.parse(fs.readFileSync(path.join(root, '.uooc-status.json'), 'utf8'));
+      if (scenario === 'cache-busy') {
+        assert.deepEqual(state, oldState, 'A locked cache must keep the last valid contents.');
+        assert.match(child.stdout, /成功 2，失败 0/);
+        assert.match(child.stdout, /显示缓存暂未保存/);
+        continue;
+      }
       assert.equal(state.loginExpired, scenario === 'expired');
       assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8')).customField, 'preserve');
       if (['expired', 'network'].includes(scenario)) {
         assert.equal(fs.readFileSync(path.join(root, '.uooc-auth.json'), 'utf8'), auth, 'Failed validation must preserve existing credentials.');
       } else {
         assert.equal(state.courses[url].status, 'signed');
-        assert.equal(state.courses[url].count, scenario === 'success' ? 3 : null);
-        assert.equal(state.courses[url].total, scenario === 'success' ? 30 : null);
+        assert.equal(state.courses[url].count, scenario === 'count-failed' ? null : 3);
+        assert.equal(state.courses[url].total, scenario === 'count-failed' ? null : 30);
+        assert.equal(state.courses[url].countPending, false);
       }
     }
     if (process.platform === 'win32') {
@@ -81,7 +96,7 @@ module.exports = function testState() {
         }
       }
     }
-    console.log('通过：整次运行的失效退出码、网络错误区分、次数缓存、查询失败保留签到结果和原登录数据保护（模拟账户）。');
+    console.log('通过：失效退出码、网络错误区分、延迟次数同步、缓存占用不打断其余课程和登录数据保护（模拟账户）。');
   } finally {
     const resolved = path.resolve(root);
     assert.equal(path.dirname(resolved), path.resolve(os.tmpdir()));

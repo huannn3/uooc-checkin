@@ -51,11 +51,13 @@ async function main() {
         assert.equal(waiting, true, '签到响应监听必须先于页面导航');
         return { ok: () => navOK };
       },
+      waitForTimeout: async () => {},
       request: { get: async (url, options) => {
         assert.equal(new URL(url).pathname, '/home/course/progress');
         assert.equal(options.params.cid, '123');
         if (progress instanceof Error) throw progress;
-        return progress && progress.json ? progress : response({ code: 1, data: progress });
+        const value = typeof progress === 'function' ? progress() : progress;
+        return value && value.json ? value : response({ code: 1, data: value });
       } },
     };
   }
@@ -81,6 +83,26 @@ async function main() {
     { signin_cnt: '3', signin_total: '30' }), url);
   assert.equal(counted.count, 3);
   assert.equal(counted.total, 30);
+  let queries = 0;
+  const delayed = await visitCourse(pageFor(response({ code: 1, data: { is_sign: 1 } }), true, () => {
+    queries++;
+    return { signin_cnt: queries === 1 ? '5' : '6', signin_total: '20', signin_time: queries === 1 ? '2000-01-01' : today };
+  }), url, 30000, { count: 5, total: 20, checkedAt: '2000-01-01T00:00:00Z' });
+  assert.equal(queries, 2);
+  assert.equal(delayed.count, 6);
+  assert.equal(delayed.countPending, undefined);
+  queries = 0;
+  const timeAheadOfCount = await visitCourse(pageFor(response({ code: 1, data: { is_sign: 1 } }), true, () => {
+    queries++;
+    return { signin_cnt: queries < 3 ? '5' : '6', signin_total: '20', signin_time: today };
+  }), url, 30000, { count: 5, total: 20, checkedAt: '2000-01-01T00:00:00Z' });
+  assert.equal(queries, 3);
+  assert.equal(timeAheadOfCount.count, 6);
+  const pending = await visitCourse(pageFor(response({ code: 1, data: { is_sign: 1 } }), true,
+    { signin_cnt: '5', signin_total: '20', signin_time: '2000-01-01' }), url);
+  assert.equal(pending.status, 'signed');
+  assert.equal(pending.count, 5, 'Never invent a +1 when the platform has not returned it.');
+  assert.equal(pending.countPending, true);
   const countFailed = await visitCourse(pageFor(response({ code: 1, data: { is_sign: 1 } }), true, new Error('network')), url);
   assert.equal(countFailed.status, 'signed');
   assert.equal(countFailed.countError, 'network');
@@ -102,6 +124,7 @@ async function main() {
   await assert.rejects(visitCourse(pageFor(nonJSON), url), /非 JSON/);
   console.log('通过：课程地址校验、响应监听顺序、成功、登录过期、错误返回和超时处理。');
   require('./test-state')();
+  await require('./test-status')();
   if (process.argv.includes('--browser')) {
     const browser = await playwright().chromium.launch({ channel: 'msedge', headless: true, chromiumSandbox: true });
     try {
