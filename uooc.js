@@ -202,6 +202,47 @@ async function openSetupBrowser(profile = PROFILE) {
   throw new Error('无法连接配置窗口。请关闭之前脚本打开的所有 Edge 窗口，再运行 setup。');
 }
 
+async function autoLogin() {
+  const login = readSavedLogin();
+  if (!login) { log('未配置可用的登录账号，请点击“登录账号设置”保存账号，或手动重新登录。'); return null; }
+  let browser, profile;
+  try {
+    profile = fs.mkdtempSync(path.join(os.tmpdir(), 'uooc-relogin-'));
+    browser = await openSetupBrowser(profile);
+    const context = browser.contexts()[0];
+    const page = context.pages()[0] || await context.newPage();
+    const response = await page.goto(ORIGIN + '/league/union', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    if (!response?.ok()) throw new Error('登录页面不可用。');
+    await fillLogin(page, login, 30000);
+    // Login submission can finish after the button click. Retry only an unconfirmed session.
+    for (let attempt = 0; ; attempt++) {
+      try { await checkLogin(context.request, ORIGIN, 5000); break; } catch (error) {
+        if (error.code !== 'LOGIN_EXPIRED' || attempt === 9) throw error;
+        await page.waitForTimeout(500);
+      }
+    }
+    const state = siteState(await context.storageState({ indexedDB: true }));
+    if (!state.cookies.length && !state.origins.length) throw new Error('未取得可恢复的会话。');
+    return state;
+  } catch {
+    // Playwright errors can include filled values. Keep account/password out of logs.
+    log('自动登录未能完成；可能需要手动验证、检查账号密码，或等待平台恢复后重试。');
+    return null;
+  } finally {
+    login.password = '';
+    if (browser) {
+      for (const context of browser.contexts()) for (const page of context.pages()) await page.close().catch(() => {});
+      await browser.close().catch(() => {});
+    }
+    if (profile) {
+      const resolved = path.resolve(profile);
+      if (path.dirname(resolved) === path.resolve(os.tmpdir()) && path.basename(resolved).startsWith('uooc-relogin-')) {
+        try { fs.rmSync(resolved, { recursive: true, force: true }); } catch { /* Edge may still be releasing temporary files. */ }
+      }
+    }
+  }
+}
+
 function signinResult(info, progress, today) {
   if (String(info.is_sign) === '1') return { status: 'signed' };
   if (String(progress.signin_time || '').slice(0, 10) === today) {
@@ -214,9 +255,9 @@ function signinResult(info, progress, today) {
 }
 
 async function responseData(response) {
-  if (response.url && /\/(?:login|signin)(?:\/|$)/i.test(new URL(response.url()).pathname)) throw loginError();
   if (response.status() === 401) throw loginError();
   if (!response.ok()) throw new Error(`课程接口 HTTP ${response.status()}。`);
+  if (response.url && /\/(?:login|signin)(?:\/|$)/i.test(new URL(response.url()).pathname)) throw loginError();
   let data;
   try { data = await response.json(); } catch { throw new Error('课程接口返回了非 JSON 内容。'); }
   if (String(data.code) === '401' || (String(data.code) !== '1' && /未登[录陆]|请(?:先|重新)?登[录陆]|登[录陆](?:已)?(?:失效|过期|超时)/.test(String(data.msg || '')))) throw loginError();
@@ -238,8 +279,9 @@ async function visitCourse(page, url, timeout = 30000, previous = {}) {
       && endpoint.searchParams.get('cid') === cid && response.request().method() === 'GET';
   }, { timeout }).then(response => ({ response }), () => ({ response: null }));
   const navigation = await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
-  if (page.url && /\/(?:login|signin)(?:\/|$)/i.test(new URL(page.url()).pathname)) throw loginError();
+  if (navigation?.status?.() === 401) throw loginError();
   if (!navigation || !navigation.ok()) throw new Error('课程页面请求失败，请检查网络和登录状态。');
+  if (page.url && /\/(?:login|signin)(?:\/|$)/i.test(new URL(page.url()).pathname)) throw loginError();
   const { response } = await receipt;
   if (!response) throw new Error('未收到课程信息响应，请检查页面是否正常加载。');
   const info = await responseData(response);
@@ -290,18 +332,14 @@ async function main() {
   }
   const courses = readCourses();
   const setup = mode === 'setup' || mode === 'login';
-  if (!setup && (!courses.length || !fs.existsSync(AUTH))) {
-    if (courses.length) {
-      await saveStatus({ ...readStatus(), loginExpired: true, updatedAt: new Date().toISOString() });
-      throw loginError();
-    }
+  if (!setup && !courses.length) {
     throw new Error('请先运行 setup，在浏览器中登录并逐个进入需要签到的课程。');
   }
   const browser = setup ? await openSetupBrowser() : await playwright().chromium.launch({
     channel: 'msedge', headless: !process.argv.includes('--visible'), chromiumSandbox: true,
   });
   try {
-    const context = setup ? browser.contexts()[0] : await browser.newContext({ storageState: AUTH });
+    let context = setup ? browser.contexts()[0] : await browser.newContext({ storageState: fs.existsSync(AUTH) ? AUTH : undefined });
     if (setup) {
       let saving = Promise.resolve();
       let savePending = false;
@@ -367,9 +405,60 @@ async function main() {
       let successes = 0;
       const previous = readStatus();
       const report = { updatedAt: new Date().toISOString(), loginExpired: Boolean(previous.loginExpired), courses: previous.courses || {} };
+      const origins = new Set(courses.map(url => new URL(url).origin));
+      let recoveryAttempted = false;
+      const recover = async error => {
+        if (error.code !== 'LOGIN_EXPIRED' || recoveryAttempted) return false;
+        recoveryAttempted = true;
+        log('检测到登录失效，尝试自动重新登录（本次运行最多一次）。');
+        const state = await autoLogin();
+        if (!state) return false;
+        let restored;
+        try {
+          restored = await browser.newContext({ storageState: state });
+          for (const origin of origins) await checkLogin(restored.request, origin);
+          fs.writeFileSync(AUTH + '.tmp', JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
+          fs.renameSync(AUTH + '.tmp', AUTH);
+        } catch {
+          if (restored) await restored.close().catch(() => {});
+          log('新登录会话未能核实或保存，自动恢复未完成；请手动重新登录。');
+          return false;
+        } finally {
+          try { fs.rmSync(AUTH + '.tmp', { force: true }); } catch { }
+        }
+        const previousContext = context;
+        context = restored;
+        await previousContext.close().catch(() => {});
+        report.loginExpired = false;
+        delete report.error;
+        log('自动登录成功，已保存并核实可恢复的登录状态，继续签到。');
+        return true;
+      };
+      const visit = async url => {
+        for (;;) {
+          const page = await context.newPage();
+          let result, error;
+          try { result = await visitCourse(page, url, 30000, report.courses[url]); }
+          catch (caught) { error = caught; }
+          finally { await page.close().catch(() => {}); }
+          if (error) {
+            if (await recover(error)) continue;
+            throw error;
+          }
+          if (result.loginExpired && await recover(loginError())) {
+            result.loginExpired = false;
+            result.countError = '本课程签到已确认，登录已自动恢复；次数将在下次签到检查时刷新。';
+          }
+          return result;
+        }
+      };
       // 先验证会话，避免跳回登录页后只得到课程响应超时。
-      for (const origin of new Set(courses.map(url => new URL(url).origin))) {
-        try { await checkLogin(context.request, origin); } catch (error) {
+      for (const origin of origins) {
+        try {
+          if (!fs.existsSync(AUTH)) throw loginError();
+          await checkLogin(context.request, origin);
+        } catch (error) {
+          if (await recover(error)) continue;
           if (error.code === 'LOGIN_EXPIRED') report.loginExpired = true;
           report.error = error.message;
           for (const url of courses) {
@@ -381,9 +470,8 @@ async function main() {
       }
       report.loginExpired = false;
       for (const url of courses) {
-        const page = await context.newPage();
         try {
-          const result = await visitCourse(page, url, 30000, report.courses[url]);
+          const result = await visit(url);
           const label = { signed: '今日签到成功', already: '今日已签到', complete: '签到次数已满' }[result.status];
           const counts = result.count === undefined ? '；签到次数暂不可用' : `；签到次数 ${result.count}/${result.total}${result.countPending ? '（待同步）' : ''}`;
           log(`${label}：${result.title}（${url}）${counts}`);
@@ -400,7 +488,7 @@ async function main() {
           report.loginExpired = error.code === 'LOGIN_EXPIRED';
           report.error = error.message;
           report.courses[url] = { ...report.courses[url], status: 'failed', countError: error.message, lastAttemptAt: new Date().toISOString() };
-        } finally { await page.close(); }
+        }
         report.updatedAt = new Date().toISOString();
         await saveStatus(report);
         if (report.loginExpired) break;

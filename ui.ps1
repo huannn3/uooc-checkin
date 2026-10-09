@@ -60,7 +60,7 @@ function Add-Button($Parent, $Text, $X, $Y, $Width, $Height, $Primary = $false) 
 }
 
 $form = [System.Windows.Forms.Form]::new()
-$form.Text = 'Uooc 签到助手 v1.2.1'
+$form.Text = 'Uooc 签到助手 v1.3.0'
 $form.ClientSize = [System.Drawing.Size]::new(1000, 780)
 $form.MinimumSize = [System.Drawing.Size]::new(1016, 819)
 $form.StartPosition = 'CenterScreen'
@@ -77,7 +77,7 @@ $header.Anchor = 'Top, Left, Right'
 $header.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#13233F')
 $form.Controls.Add($header)
 $null = Add-Label $header 'Uooc 自动签到' 24 18 570 40 24 '#FFFFFF' $true
-$null = Add-Label $header '保存课程，核实签到；登录失效时会提醒重新登录。' 26 66 610 26 10 '#CBD5E1'
+$null = Add-Label $header '保存课程，核实签到；掉登后先尝试自动恢复，未完成会提醒。' 26 66 610 26 10 '#CBD5E1'
 $statusLabel = Add-Label $header '就绪' 650 42 324 32 11 '#A7F3D0' $true
 $statusLabel.TextAlign = 'MiddleRight'
 $statusLabel.Anchor = 'Top, Right'
@@ -160,7 +160,7 @@ $progressBar.SetBounds(20, 210, 912, 4)
 $progressBar.Anchor = 'Bottom, Left, Right'
 $progressBar.MarqueeAnimationSpeed = 25
 $logPanel.Controls.Add($progressBar)
-$footer = Add-Label $form '定时运行需要电脑开机且用户已登录。登录可能失效，出现提醒后请重新登录。' 24 744 952 26 9 '#667085'
+$footer = Add-Label $form '定时运行需要电脑开机且用户已登录。掉登后自动恢复一次，未完成时请按提醒手动处理。' 24 744 952 26 9 '#667085'
 $footer.Anchor = 'Bottom, Left, Right'
 
 function Update-Log {
@@ -358,7 +358,7 @@ $timer.Add_Tick({
             }
         }
         if ($exitCode -eq 2) {
-            [System.Windows.Forms.MessageBox]::Show('登录已失效。请点击“登录 / 添加课程”重新登录，然后再点击“立即签到”。', '需要重新登录', 'OK', 'Warning') | Out-Null
+            [System.Windows.Forms.MessageBox]::Show('登录已失效，本次未能恢复登录。请点击“登录 / 添加课程”重新登录，然后再点击“立即签到”。', '需要重新登录', 'OK', 'Warning') | Out-Null
         } elseif ($exitCode -ne 0 -and $errorText.Trim()) {
             [System.Windows.Forms.MessageBox]::Show($errorText.Substring(0, [Math]::Min(700, $errorText.Length)), '操作未完成') | Out-Null
         }

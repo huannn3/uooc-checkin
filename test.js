@@ -112,6 +112,12 @@ async function main() {
   const redirected = pageFor(response({ code: 1 }));
   redirected.url = () => 'https://www.uooc.net.cn/index/login';
   await assert.rejects(visitCourse(redirected, url), error => error.code === 'LOGIN_EXPIRED');
+  const redirectedNetwork = pageFor(response({ code: 1 }), false);
+  redirectedNetwork.url = redirected.url;
+  await assert.rejects(visitCourse(redirectedNetwork, url), error => error.code !== 'LOGIN_EXPIRED' && /请求失败/.test(error.message));
+  const login502 = { ...response({}, 502), url: redirected.url };
+  await assert.rejects(checkLogin({ get: async () => login502 }, 'https://www.uooc.net.cn'),
+    error => error.code !== 'LOGIN_EXPIRED' && /HTTP 502/.test(error.message));
   for (const data of [{ code: 401 }, { code: 0, msg: '请先登陆' }]) {
     await assert.rejects(checkLogin({ get: async () => response(data) }, 'https://www.uooc.net.cn'), error => error.code === 'LOGIN_EXPIRED');
   }
@@ -124,6 +130,7 @@ async function main() {
   await assert.rejects(visitCourse(pageFor(nonJSON), url), /非 JSON/);
   console.log('通过：课程地址校验、响应监听顺序、成功、登录过期、错误返回和超时处理。');
   require('./test-state')();
+  require('./test-relogin')();
   await require('./test-status')();
   await require('./test-login')();
   if (process.argv.includes('--browser')) {

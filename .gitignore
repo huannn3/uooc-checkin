@@ -1,5 +1,6 @@
 .uooc-profile/
 .uooc-auth.json
+.uooc-auth.json.tmp
 .uooc-login.dat
 credential-settings.exe
 node_modules/
