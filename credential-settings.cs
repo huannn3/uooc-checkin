@@ -12,7 +12,7 @@ class CredentialSettings {
         string file = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ".uooc-login.dat");
         using (var form = new Form { Text = "Uooc 登录账号设置", ClientSize = new Size(460, 245), StartPosition = FormStartPosition.CenterScreen,
             FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, Font = new Font("Microsoft YaHei UI", 10) }) {
-            var info = new Label { Text = "仅在本机当前 Windows 账户下加密保存。打开登录窗口时自动填写，验证码需你手动点击。", Left = 20, Top = 12, Width = 420, Height = 46 };
+            var info = new Label { Text = "仅在本机当前 Windows 账户下加密保存。登录时自动填写并尝试点击验证框一次，未通过时需手动完成。", Left = 20, Top = 12, Width = 420, Height = 46 };
             var accountLabel = new Label { Text = "手机号 / 邮箱", Left = 20, Top = 70, Width = 110 };
             var account = new TextBox { Left = 140, Top = 66, Width = 300 };
             var passwordLabel = new Label { Text = "密码", Left = 20, Top = 112, Width = 110 };

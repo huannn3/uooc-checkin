@@ -103,21 +103,44 @@ async function fillLogin(page, login, timeout = 300000) {
   await account.fill(login.account);
   if (!trusted(frame.url())) throw new Error('登录页面来源已改变。');
   await frame.locator('input[placeholder="密码"]:visible').fill(login.password);
-  log('账号密码已自动填入，请亲自点击验证框；验证通过后会自动提交登录。');
-  // Human verification is deliberately left to the user. Never click its controls.
+  log('账号密码已自动填入；正在尝试点击验证框一次。');
   const form = account.locator('xpath=ancestor::form');
   const button = form.getByRole('button', { name: '登录', exact: true });
   await button.waitFor({ state: 'visible', timeout });
+  const passed = () => form.getByText(/验证通过[!！]?/).isVisible();
+  let manualNotice = false;
+  if (!await passed()) {
+    try {
+      const checkbox = form.locator('#aliyunCaptcha-checkbox-icon:visible');
+      await checkbox.waitFor({ state: 'visible', timeout: 5000 });
+      if (!trusted(frame.url())) throw new Error('登录页面来源已改变。');
+      const box = await checkbox.boundingBox();
+      if (!box) throw new Error('验证框不可见。');
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 });
+      if (!trusted(frame.url())) throw new Error('登录页面来源已改变。');
+      await checkbox.click({ timeout: 3000 });
+      log('已点击验证框一次，等待网站验证结果。');
+    } catch {
+      log('未能完成自动点击，请在 Edge 中手动完成验证；通过后会自动提交登录。');
+      manualNotice = true;
+    }
+  }
+  // One ordinary click only; additional challenges are left to the user.
+  const manualAt = Date.now() + 5000;
   const stopAt = Date.now() + timeout;
   while (Date.now() < stopAt) {
     if (!trusted(frame.url())) throw new Error('登录页面来源已改变。');
-    if (await form.getByText(/验证通过[!！]?/).isVisible() && await button.isEnabled()) {
+    if (await passed() && await button.isEnabled()) {
       await button.click();
       return;
     }
+    if (!manualNotice && Date.now() >= manualAt) {
+      log('自动点击暂未完成验证，请在 Edge 中手动处理；程序不会重复点击或处理进一步的验证题。');
+      manualNotice = true;
+    }
     await page.waitForTimeout(500);
   }
-  throw new Error('等待手动验证超时。');
+  throw new Error('等待验证通过超时。');
 }
 
 function signinCounts(progress) {
@@ -157,7 +180,7 @@ async function openSetupBrowser(profile = PROFILE) {
   });
   const port = server.address().port;
   await new Promise(resolve => server.close(resolve));
-  // 普通 Edge 启动；只在本机开放调试连接，用户手动完成登录和验证码。
+  // 普通 Edge 启动；只在本机开放调试连接，自动流程未成功时由用户接手。
   const child = spawn(executable, [
     `--user-data-dir=${profile}`, '--profile-directory=Default',
     '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${port}`,
