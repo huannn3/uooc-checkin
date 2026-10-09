@@ -50,22 +50,8 @@ try {
     & (Join-Path $testRoot 'run.ps1') remove-startup
     if ($testRegistration.Removed -ne 'UoocCheckinStartup') { throw 'Owned startup task was not removed.' }
 
-    # Exercise rollback in the fixture directory and verify personal files survive.
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'previous-v1.0.0') -Destination $testRoot -Recurse
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'rollback.ps1') -Destination $testRoot
-    foreach ($file in (Get-ChildItem -LiteralPath (Join-Path $testRoot 'previous-v1.0.0') -File | Where-Object { $_.Name -ne '.gitignore' })) {
-        if (-not (Test-Path -LiteralPath (Join-Path $testRoot $file.Name))) { Copy-Item -LiteralPath $file.FullName -Destination $testRoot }
-    }
-    $null = New-Item -ItemType Directory -Path (Join-Path $testRoot '.uooc-profile')
-    [IO.File]::WriteAllText((Join-Path $testRoot '.uooc-profile\fixture.txt'), 'keep profile')
-    $configHash = (Get-FileHash -LiteralPath (Join-Path $testRoot 'config.json')).Hash
-    $authHash = (Get-FileHash -LiteralPath (Join-Path $testRoot '.uooc-auth.json')).Hash
-    & (Join-Path $testRoot 'rollback.ps1') -SelfTest
-    if ($configHash -ne (Get-FileHash -LiteralPath (Join-Path $testRoot 'config.json')).Hash -or $authHash -ne (Get-FileHash -LiteralPath (Join-Path $testRoot '.uooc-auth.json')).Hash) { throw 'Rollback changed personal configuration or credentials.' }
-    if ([IO.File]::ReadAllText((Join-Path $testRoot '.uooc-profile\fixture.txt')) -ne 'keep profile') { throw 'Rollback changed browser data.' }
-    if ((Get-FileHash -LiteralPath (Join-Path $testRoot 'run.ps1')).Hash -ne (Get-FileHash -LiteralPath (Join-Path $testRoot 'previous-v1.0.0\run.ps1')).Hash) { throw 'Rollback did not restore v1.0.0 code.' }
     Write-Output 'Passed: portable runtime, Chinese UTF-8 configuration and UTF-8 process output (mock task, no real credentials).'
-    Write-Output 'Passed: user startup, foreign task protection and rollback preserving personal data (isolated fixture).'
+    Write-Output 'Passed: user startup and foreign task protection (isolated fixture).'
 } finally {
     [Console]::OutputEncoding = $originalEncoding
     # Only remove the unique test directory created above, under the system temp directory.

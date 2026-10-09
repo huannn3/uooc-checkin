@@ -60,7 +60,7 @@ function Add-Button($Parent, $Text, $X, $Y, $Width, $Height, $Primary = $false) 
 }
 
 $form = [System.Windows.Forms.Form]::new()
-$form.Text = 'Uooc 签到助手 v1.1.1'
+$form.Text = 'Uooc 签到助手 v1.1.2'
 $form.ClientSize = [System.Drawing.Size]::new(1000, 780)
 $form.MinimumSize = [System.Drawing.Size]::new(1016, 819)
 $form.StartPosition = 'CenterScreen'
@@ -159,7 +159,7 @@ $progressBar.SetBounds(20, 210, 912, 4)
 $progressBar.Anchor = 'Bottom, Left, Right'
 $progressBar.MarqueeAnimationSpeed = 25
 $logPanel.Controls.Add($progressBar)
-$footer = Add-Label $form '定时运行需要电脑开机且用户已登录。回退请先关闭助手，再双击“回退第一版.vbs”。' 24 744 952 26 9 '#667085'
+$footer = Add-Label $form '定时运行需要电脑开机且用户已登录。登录可能失效，出现提醒后请重新登录。' 24 744 952 26 9 '#667085'
 $footer.Anchor = 'Bottom, Left, Right'
 
 function Update-Log {
