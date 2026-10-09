@@ -60,7 +60,7 @@ function Add-Button($Parent, $Text, $X, $Y, $Width, $Height, $Primary = $false) 
 }
 
 $form = [System.Windows.Forms.Form]::new()
-$form.Text = 'Uooc 签到助手 v1.3.0'
+$form.Text = 'Uooc 签到助手 v1.3.1'
 $form.ClientSize = [System.Drawing.Size]::new(1000, 780)
 $form.MinimumSize = [System.Drawing.Size]::new(1016, 819)
 $form.StartPosition = 'CenterScreen'

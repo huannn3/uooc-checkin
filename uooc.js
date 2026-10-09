@@ -97,12 +97,21 @@ async function fillLogin(page, login, timeout = 300000) {
   }
   if (!frame) throw new Error('未找到登录表单。');
   await frame.waitForLoadState('load', { timeout: 30000 });
-  await frame.locator('#passwd_li').click();
+  const passwordTab = frame.locator('#passwd_li');
+  if (!/\bselected\b/.test(await passwordTab.getAttribute('class') || '')) await passwordTab.click();
   if (!trusted(frame.url())) throw new Error('登录页面来源已改变。');
   const account = frame.locator('input[placeholder="手机号/邮箱"]:visible');
   await account.fill(login.account);
   if (!trusted(frame.url())) throw new Error('登录页面来源已改变。');
-  await frame.locator('input[placeholder="密码"]:visible').fill(login.password);
+  const password = frame.locator('input[placeholder="密码"]:visible');
+  const enterPassword = async () => {
+    if (!trusted(frame.url())) throw new Error('登录页面来源已改变。');
+    await password.fill('');
+    await password.pressSequentially(login.password, { delay: 25 });
+    await password.press('Tab');
+  };
+  await enterPassword();
+  await page.waitForTimeout(300);
   log('账号密码已自动填入；正在尝试点击验证框一次。');
   const form = account.locator('xpath=ancestor::form');
   const button = form.getByRole('button', { name: '登录', exact: true });
@@ -131,6 +140,25 @@ async function fillLogin(page, login, timeout = 300000) {
   while (Date.now() < stopAt) {
     if (!trusted(frame.url())) throw new Error('登录页面来源已改变。');
     if (await passed() && await button.isEnabled()) {
+      const accountValue = await account.inputValue();
+      const passwordValue = await password.inputValue();
+      if ((accountValue && accountValue !== login.account) || (passwordValue && passwordValue !== login.password)) {
+        throw new Error('表单内容已更改，请手动完成登录。');
+      }
+      if (!accountValue) {
+        if (!trusted(frame.url())) throw new Error('登录页面来源已改变。');
+        await account.fill(login.account);
+      }
+      if (!passwordValue) {
+        log('验证后密码框被清空，正在补填一次并重新核实表单。');
+        await enterPassword();
+      }
+      await page.waitForTimeout(300);
+      if (!trusted(frame.url())) throw new Error('登录页面来源已改变。');
+      if (await account.inputValue() !== login.account || await password.inputValue() !== login.password
+          || !await passed() || !await button.isEnabled()) {
+        throw new Error('登录表单仍在变化，请手动完成登录；本次未自动提交。');
+      }
       await button.click();
       return;
     }

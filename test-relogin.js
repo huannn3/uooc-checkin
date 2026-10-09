@@ -70,12 +70,16 @@ module.exports = function () {
       const runBrowser = {newContext:async options=>context(typeof options.storageState==='object'),close:async()=>{}};
       const button = {waitFor:async()=>{},isEnabled:async()=>true,click:async()=>{metrics.submits++;}};
       let passed = false;
+      const values = {};
       const checkbox = {waitFor:async()=>{},boundingBox:async()=>({x:100,y:200,width:24,height:24}),
-        click:async()=>{metrics.clicks++; passed = scenario!=='verification-failed';}};
+        click:async()=>{metrics.clicks++; passed = scenario!=='verification-failed'; if(scenario==='password-cleared') values['input[placeholder="密码"]:visible']='';}};
       const form = {getByRole:()=>button,getByText:()=>({isVisible:async()=>passed}),locator:()=>checkbox};
       const frame = {url:()=> 'https://www.uooc.net.cn/user/login',waitForLoadState:async()=>{},locator: selector=>({
         click:async()=>{if(scenario==='form-failed') throw new Error('private-fixture-password');},
-        fill:async value=>{if(value !== (selector.includes('手机号/邮箱')?'fixture@example.invalid':'private-fixture-password')) throw new Error('Unexpected fixture input');},
+        getAttribute:async()=>'',
+        fill:async value=>{if(value !== (selector.includes('手机号/邮箱')?'fixture@example.invalid':'')) throw new Error('Unexpected fixture input'); values[selector]=value;},
+        pressSequentially:async value=>{if(value!=='private-fixture-password') throw new Error('Unexpected fixture password'); values[selector]=value;},
+        press:async()=>{},inputValue:async()=>values[selector]||'',
         locator:()=>form
       })};
       const loginPage = {url:()=> 'https://www.uooc.net.cn/league/union',frames:()=>[frame],locator:()=>({click:async()=>{}}),
@@ -87,7 +91,7 @@ module.exports = function () {
     `);
 
     const failures = ['verification-failed', 'password-failed', 'restore-failed', 'save-failed', 'profile-failed', 'login502', 'form-failed', 'empty-session'];
-    for (const scenario of ['success', 'missing-session', 'midway', 'count-expired', 'again-expired', 'network502', 'normal', ...failures]) {
+    for (const scenario of ['success', 'password-cleared', 'missing-session', 'midway', 'count-expired', 'again-expired', 'network502', 'normal', ...failures]) {
       fs.writeFileSync(path.join(root, 'config.json'), JSON.stringify({ courses: urls, customField: 'preserved' }));
       fs.writeFileSync(path.join(root, '.uooc-auth.json'), oldAuth);
       fs.writeFileSync(path.join(root, '.uooc-login.dat'), 'isolated encrypted-data placeholder');
