@@ -125,6 +125,7 @@ async function main() {
   console.log('通过：课程地址校验、响应监听顺序、成功、登录过期、错误返回和超时处理。');
   require('./test-state')();
   await require('./test-status')();
+  await require('./test-login')();
   if (process.argv.includes('--browser')) {
     const browser = await playwright().chromium.launch({ channel: 'msedge', headless: true, chromiumSandbox: true });
     try {

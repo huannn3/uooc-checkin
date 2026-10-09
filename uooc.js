@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const net = require('node:net');
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 
 const ROOT = __dirname;
 const CONFIG = path.join(ROOT, 'config.json');
@@ -72,6 +72,54 @@ async function checkLogin(request, origin, timeout = 10000) {
   await responseData(await request.get(origin + '/home/member/user', { timeout }));
 }
 
+function readSavedLogin() {
+  if (!fs.existsSync(path.join(ROOT, '.uooc-login.dat'))) return null;
+  try {
+    const helper = path.join(process.env.WINDIR, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    const login = JSON.parse(execFileSync(helper, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'credentials.ps1'), '-Mode', 'read'],
+      { encoding: 'utf8', windowsHide: true, timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] }));
+    if (typeof login?.account !== 'string' || !login.account || typeof login.password !== 'string' || !login.password) throw new Error();
+    return login;
+  } catch { log('保存的登录账号暂不可用，请重新设置或手动登录。'); return null; }
+}
+
+async function fillLogin(page, login, timeout = 300000) {
+  // Only the observed HTTPS Uooc login frame may receive credentials.
+  const trusted = value => { try { const url = new URL(value); return url.protocol === 'https:' && url.origin === ORIGIN && !url.username && !url.password; } catch { return false; } };
+  if (!trusted(page.url())) throw new Error('登录页面来源不正确。');
+  await page.locator('#loginBtn').click();
+  const deadline = Date.now() + 15000;
+  let frame;
+  while (Date.now() < deadline) {
+    frame = page.frames().find(item => trusted(item.url()) && new URL(item.url()).pathname === '/user/login');
+    if (frame) break;
+    await page.waitForTimeout(250);
+  }
+  if (!frame) throw new Error('未找到登录表单。');
+  await frame.waitForLoadState('load', { timeout: 30000 });
+  await frame.locator('#passwd_li').click();
+  if (!trusted(frame.url())) throw new Error('登录页面来源已改变。');
+  const account = frame.locator('input[placeholder="手机号/邮箱"]:visible');
+  await account.fill(login.account);
+  if (!trusted(frame.url())) throw new Error('登录页面来源已改变。');
+  await frame.locator('input[placeholder="密码"]:visible').fill(login.password);
+  log('账号密码已自动填入，请亲自点击验证框；验证通过后会自动提交登录。');
+  // Human verification is deliberately left to the user. Never click its controls.
+  const form = account.locator('xpath=ancestor::form');
+  const button = form.getByRole('button', { name: '登录', exact: true });
+  await button.waitFor({ state: 'visible', timeout });
+  const stopAt = Date.now() + timeout;
+  while (Date.now() < stopAt) {
+    if (!trusted(frame.url())) throw new Error('登录页面来源已改变。');
+    if (await form.getByText(/验证通过[!！]?/).isVisible() && await button.isEnabled()) {
+      await button.click();
+      return;
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error('等待手动验证超时。');
+}
+
 function signinCounts(progress) {
   const values = [progress.signin_cnt, progress.signin_total];
   if (!values.every(value => value !== null && value !== undefined && /^\d+$/.test(String(value).trim()))) return {};
@@ -97,7 +145,7 @@ function siteState(state) {
   };
 }
 
-async function openSetupBrowser() {
+async function openSetupBrowser(profile = PROFILE) {
   const candidates = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles, process.env.LOCALAPPDATA]
     .filter(Boolean).map(base => path.join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
   const executable = candidates.find(file => fs.existsSync(file));
@@ -111,7 +159,7 @@ async function openSetupBrowser() {
   await new Promise(resolve => server.close(resolve));
   // 普通 Edge 启动；只在本机开放调试连接，用户手动完成登录和验证码。
   const child = spawn(executable, [
-    `--user-data-dir=${PROFILE}`, '--profile-directory=Default',
+    `--user-data-dir=${profile}`, '--profile-directory=Default',
     '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${port}`,
     '--no-first-run', '--new-window', ORIGIN + '/league/union',
   ], { stdio: 'ignore' });
@@ -275,6 +323,18 @@ async function main() {
       });
       log('请在 Edge 中登录，逐个进入需要签到的课程；完成后关闭这个 Edge 窗口。');
       log('课程和登录状态在同一个窗口记录，请勿分享 .uooc-auth.json 或 .uooc-profile。');
+      const login = readSavedLogin();
+      if (login) {
+        const page = context.pages().find(item => item.url().startsWith(ORIGIN + '/'));
+        if (page) {
+          let loggedIn = false;
+          try { await checkLogin(context.request, ORIGIN); loggedIn = true; saveLogin(page.url()); } catch { }
+          if (!loggedIn) {
+            try { await fillLogin(page, login); } catch { log('自动填写流程已结束；如未登录，请在窗口中手动完成登录。'); }
+          }
+        }
+        login.password = '';
+      }
       await closed;
       await saving;
       log(`配置完成，共 ${courses.length} 门课程；本次登录状态${savedLogin ? '已保存' : '未验证成功，请重新配置'}。`);
@@ -328,7 +388,7 @@ async function main() {
   } finally { await browser.close(); }
 }
 
-module.exports = { courseUrl, readCourses, visitCourse, signinResult, signinCounts, checkLogin, saveStatus, siteState, playwright };
+module.exports = { courseUrl, readCourses, visitCourse, signinResult, signinCounts, checkLogin, saveStatus, siteState, playwright, fillLogin, readSavedLogin, openSetupBrowser };
 if (require.main === module) main().catch(error => {
   log(`错误：${error.message}`);
   process.exitCode = error.code === 'LOGIN_EXPIRED' ? 2 : 1;

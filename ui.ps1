@@ -60,7 +60,7 @@ function Add-Button($Parent, $Text, $X, $Y, $Width, $Height, $Primary = $false) 
 }
 
 $form = [System.Windows.Forms.Form]::new()
-$form.Text = 'Uooc 签到助手 v1.1.2'
+$form.Text = 'Uooc 签到助手 v1.2.0'
 $form.ClientSize = [System.Drawing.Size]::new(1000, 780)
 $form.MinimumSize = [System.Drawing.Size]::new(1016, 819)
 $form.StartPosition = 'CenterScreen'
@@ -103,7 +103,8 @@ $null = $courseList.Columns.Add('已签 / 满分需', 112)
 $null = $courseList.Columns.Add('课程周期 ID', 150)
 $courseList.ShowItemToolTips = $true
 $coursePanel.Controls.Add($courseList)
-$null = Add-Label $coursePanel '次数为最近结果；“待同步”表示网站尚未更新。' 20 322 380 28 9 '#667085'
+$null = Add-Label $coursePanel '次数为最近结果；“待同步”表示网站尚未更新。' 20 299 526 18 9 '#667085'
+$loginSettings = Add-Button $coursePanel '登录账号设置' 20 316 144 32
 $removeCourse = Add-Button $coursePanel '移除选中课程' 402 316 144 32
 $removeCourse.Anchor = 'Top, Right'
 
@@ -237,6 +238,7 @@ function Update-State {
     }
     $runButton.Enabled = $ready -and -not $busy
     $setupButton.Enabled = -not $busy
+    $loginSettings.Enabled = -not $busy
     $scheduleButton.Enabled = $ready -and -not $busy
     $removeCourse.Enabled = -not $busy -and $courseList.SelectedItems.Count -gt 0
     $visibleCheck.Enabled = -not $busy
@@ -305,6 +307,11 @@ function Start-Action([string]$Mode) {
 
 $runButton.Add_Click({ try { Start-Action 'run' } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, '无法启动') } })
 $setupButton.Add_Click({ try { Start-Action 'setup' } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, '无法启动') } })
+$loginSettings.Add_Click({
+    if ($script:Worker) { return }
+    try { & (Join-Path $script:Root 'credentials.ps1') -Mode configure }
+    catch { [System.Windows.Forms.MessageBox]::Show('账号设置窗口无法启动，请检查程序文件是否完整。', '无法启动') | Out-Null }
+})
 $scheduleButton.Add_Click({ try { Start-Action 'install-task' } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, '设置失败') } })
 $disableButton.Add_Click({ try { Start-Action 'remove-task' } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, '设置失败') } })
 $startupButton.Add_Click({ try { Start-Action 'install-startup' } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, '设置失败') } })

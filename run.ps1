@@ -56,6 +56,7 @@ if ($Mode -eq 'install-task') {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & (Join-Path $PSScriptRoot 'test-run.ps1')
     & (Join-Path $PSScriptRoot 'test-ui.ps1')
+    & (Join-Path $PSScriptRoot 'test-login.ps1')
 } else {
     $hash = [System.Security.Cryptography.SHA256]::Create()
     $instanceId = [BitConverter]::ToString($hash.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($PSScriptRoot))).Replace('-', '')
