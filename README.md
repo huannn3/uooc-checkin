@@ -2,6 +2,10 @@
 
 ## v1.1.1 朋友测试版
 
+**普通用户下载：** [Windows 便携测试包（v1.1.1）](https://github.com/huannn3/uooc-checkin/releases/download/v1.1.1/UoocCheckin-v1.1.1-win-x64.zip)。[版本说明与校验文件](https://github.com/huannn3/uooc-checkin/releases/tag/v1.1.1)。
+
+请下载上述 Windows ZIP，完整解压后双击 `launch.vbs`；GitHub 的 Source code 压缩包仅供源码维护。
+
 便携测试包适用于 64 位 Windows 10/11，附带 Node.js 和 Playwright，电脑需已安装 Microsoft Edge。无需安装 Codex、Node.js 或运行 npm。
 
 将压缩包完整解压到固定目录，双击 `launch.vbs`。先点“登录 / 添加课程”，在 Edge 中自行登录、完成验证码并逐个进入课程，保存成功后关闭配置用的 Edge 窗口。然后点击“立即签到”，成功后再按需启用每日定时。详细步骤见 `快速开始.txt`。
