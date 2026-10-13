@@ -1,12 +1,29 @@
 # Uooc 自动签到
 
-基于 **JavaScript / Node.js、Playwright 和 Microsoft Edge** 的 Windows 签到助手，用于每天进入已配置的 Uooc 课程并核实签到结果。支持多门课程、每日定时、登录 Windows 后自动打开助手、签到次数显示及登录失效提醒。
+基于 **JavaScript / Node.js 与 Playwright** 的 Uooc 签到助手（Windows 使用 Microsoft Edge；Linux 使用 Chromium），用于每天进入已配置的 Uooc 课程并核实签到结果。支持多门课程、每日定时、登录 Windows 后自动打开助手、签到次数显示及登录失效提醒。
 
 当前版本为 v1.3.1，支持可选的本机加密账号保存，以及签到掉登后的自动登录恢复。
 
 v1.3.1 修复验证成功后密码框被页面刷新清空的问题：密码通过键盘事件输入并触发失焦，等待表单更新后继续；验证通过后再次核实账密，空密码只补填一次。再次被清空或表单内容发生变化时停止自动提交，提示手动处理。已选中的密码登录标签不再重复切换。此修复同时用于配置登录和签到掉登后的自动恢复。
 
-## 下载与使用
+## Ubuntu / Linux 使用（新增跨平台支持）
+
+Linux 路径只负责进入已配置的 Uooc 课程并核实签到，不包含视频播放或测验自动化。建议 Ubuntu 22.04 及更新版本，Node.js 20+。
+
+1. 安装 Node.js，并在项目目录执行 `npm install`。
+2. 安装 Playwright 所需的 Chromium：`npx playwright install --with-deps chromium`。如果已经有 Chromium / Google Chrome，也可以使用系统浏览器完成首次登录；必要时通过 `UOOC_BROWSER=/浏览器/可执行文件` 指定路径。
+3. 执行 `node uooc.js setup`。在打开的浏览器中手动登录 Uooc，逐个进入需要签到的课程；完成后关闭该浏览器窗口。助手会保存课程清单与本地登录会话。
+4. 执行 `node uooc.js run` 手动测试签到。成功后可启用每日定时：`bash linux/install-timer.sh 08:00`（将 `08:00` 替换为所需时间，使用系统时区）。
+5. 查看定时器：`systemctl --user status uooc-checkin.timer`；查看运行日志：`journalctl --user -u uooc-checkin.service -n 100 --no-pager`；移除定时器：`bash linux/remove-timer.sh`。
+
+Linux 版本不使用 Windows DPAPI 保存账号密码；请在浏览器中手动登录。登录状态过期后，重新执行 `node uooc.js setup` 完成登录。登录状态位于 `.uooc-auth.json`，课程配置位于 `config.json`，均为本机数据；不要上传或提交这些文件。登录快照会尽可能以仅当前用户可读写的权限保存。定时任务要求用户会话及系统可运行；不会唤醒关机的电脑。
+
+Linux 定时任务通过 systemd 用户服务运行，输出可从 journal 查看。当前版本不会显示 Windows 图形界面，也不提供桌面弹窗提醒。
+
+## Uooc 本机签到面板（Linux）
+
+在项目目录运行 `npm run dashboard`，然后用浏览器打开 `http://127.0.0.1:4177`。面板显示课程与最近一次签到状态；点击“签到全部课程”并确认后，才会启动项目现有签到流程。面板服务仅绑定本机回环地址，不展示 Cookie 或认证快照。关闭运行面板的终端即可停止服务。
+
 
 **Windows 下载：** [便携包（v1.3.1）](https://github.com/huannn3/uooc-checkin/releases/download/v1.3.1/UoocCheckin-v1.3.1-win-x64.zip)。[版本说明与校验文件](https://github.com/huannn3/uooc-checkin/releases/tag/v1.3.1)。
 

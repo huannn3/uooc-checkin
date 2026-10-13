@@ -1,7 +1,32 @@
 const assert = require('node:assert/strict');
-const { courseUrl, visitCourse, signinResult, signinCounts, checkLogin, siteState, playwright } = require('./uooc');
+const { buildDashboardState, isTrustedOrigin } = require('./dashboard');
+const { courseUrl, visitCourse, signinResult, signinCounts, checkLogin, siteState, playwright, browserLaunchOptions, browserExecutableCandidates } = require('./uooc');
 
 async function main() {
+  assert.equal(isTrustedOrigin({ headers: { host: '127.0.0.1:4177', origin: 'http://127.0.0.1:4177' } }), true);
+  assert.equal(isTrustedOrigin({ headers: { host: '127.0.0.1:4177', origin: 'https://evil.example' } }), false);
+  assert.equal(isTrustedOrigin({ headers: { host: '127.0.0.1:4177' } }), false);
+  const dashboard = buildDashboardState({ courses: [
+    'https://www.uooc.net.cn/home/course/123',
+    'https://www.uooc.net.cn/home/learn/new/123#/123/go',
+  ], courseNames: { 'https://www.uooc.net.cn/home/course/123': '课程甲' } }, {
+    courses: { 'https://www.uooc.net.cn/home/course/123': { status: 'already', count: 2, total: 10 } },
+  });
+  assert.equal(dashboard.courses.length, 1, 'same course routes are shown once');
+  assert.equal(dashboard.courses[0].name, '课程甲');
+  assert.equal(dashboard.courses[0].status, 'already');
+  assert.equal(JSON.stringify(dashboard).includes('cookie'), false, 'dashboard state must not expose authentication data');
+
+  const launchOptions = browserLaunchOptions(false);
+  assert.equal(launchOptions.headless, true);
+  assert.equal(launchOptions.chromiumSandbox, process.platform !== 'linux');
+  if (process.platform === 'win32') assert.equal(launchOptions.channel, 'msedge');
+  else assert.equal(Object.hasOwn(launchOptions, 'channel'), false, 'Non-Windows platforms must not force Microsoft Edge.');
+  const browserCandidates = browserExecutableCandidates();
+  if (process.platform === 'linux') {
+    assert.ok(browserCandidates.includes('/usr/bin/chromium'));
+    assert.ok(browserCandidates.includes('/usr/bin/google-chrome'));
+  }
   const state = siteState({
     cookies: [
       { domain: '.uooc.net.cn', name: 'session', value: 'test-session', expires: -1 },

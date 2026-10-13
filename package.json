@@ -5,6 +5,7 @@
   "scripts": {
     "setup": "node uooc.js setup",
     "start": "node uooc.js run",
+    "dashboard": "node dashboard.js",
     "test": "node test.js"
   },
   "dependencies": {

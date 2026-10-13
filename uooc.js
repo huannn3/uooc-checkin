@@ -196,11 +196,40 @@ function siteState(state) {
   };
 }
 
+function browserExecutableCandidates() {
+  if (process.env.UOOC_BROWSER) return [process.env.UOOC_BROWSER];
+  if (process.platform === 'win32') {
+    return [process.env['ProgramFiles(x86)'], process.env.ProgramFiles, process.env.LOCALAPPDATA]
+      .filter(Boolean).map(base => path.join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
+  }
+  if (process.platform === 'linux') {
+    return ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
+      '/usr/bin/microsoft-edge', '/snap/bin/chromium', '/snap/bin/chromium.chromium'];
+  }
+  return [];
+}
+
+function browserLaunchOptions(visible = process.argv.includes('--visible')) {
+  const options = { headless: !visible, chromiumSandbox: process.platform !== 'linux' };
+  if (process.platform === 'win32') options.channel = 'msedge';
+  return options;
+}
+
 async function openSetupBrowser(profile = PROFILE) {
-  const candidates = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles, process.env.LOCALAPPDATA]
-    .filter(Boolean).map(base => path.join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
-  const executable = candidates.find(file => fs.existsSync(file));
-  if (!executable) throw new Error('未找到 Microsoft Edge。');
+  const candidates = browserExecutableCandidates();
+  let executable = candidates.find(file => fs.existsSync(file));
+  if (!executable && process.platform !== 'win32') {
+    try {
+      const bundled = playwright().chromium.executablePath();
+      if (fs.existsSync(bundled)) executable = bundled;
+    } catch { /* Playwright 浏览器尚未安装。 */ }
+  }
+  if (!executable) {
+    const hint = process.platform === 'linux'
+      ? '请安装 Chromium（sudo apt install chromium-browser，或运行 npx playwright install chromium），也可设置 UOOC_BROWSER 指定浏览器路径。'
+      : '未找到 Microsoft Edge。';
+    throw new Error(hint);
+  }
   const server = net.createServer();
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -227,7 +256,7 @@ async function openSetupBrowser(profile = PROFILE) {
     } catch { /* 浏览器启动中，稍后重试。 */ }
     await new Promise(resolve => setTimeout(resolve, 250));
   }
-  throw new Error('无法连接配置窗口。请关闭之前脚本打开的所有 Edge 窗口，再运行 setup。');
+  throw new Error('无法连接配置窗口。请关闭之前脚本打开的浏览器窗口，再运行 setup。');
 }
 
 async function autoLogin() {
@@ -363,9 +392,7 @@ async function main() {
   if (!setup && !courses.length) {
     throw new Error('请先运行 setup，在浏览器中登录并逐个进入需要签到的课程。');
   }
-  const browser = setup ? await openSetupBrowser() : await playwright().chromium.launch({
-    channel: 'msedge', headless: !process.argv.includes('--visible'), chromiumSandbox: true,
-  });
+  const browser = setup ? await openSetupBrowser() : await playwright().chromium.launch(browserLaunchOptions());
   try {
     let context = setup ? browser.contexts()[0] : await browser.newContext({ storageState: fs.existsSync(AUTH) ? AUTH : undefined });
     if (setup) {
@@ -509,7 +536,7 @@ async function main() {
             countError: result.countError || '', countPending: Boolean(result.countPending), checkedAt: new Date().toISOString() };
           report.loginExpired = Boolean(result.loginExpired);
           saveCourses(courses, { [url]: result.title });
-          if (!report.loginExpired) fs.writeFileSync(AUTH, JSON.stringify(siteState(await context.storageState({ indexedDB: true }))), 'utf8');
+          if (!report.loginExpired) fs.writeFileSync(AUTH, JSON.stringify(siteState(await context.storageState({ indexedDB: true }))), { encoding: 'utf8', mode: 0o600 });
         } catch (error) {
           failures++;
           log(`失败：${url}；${error.message}`);
@@ -527,7 +554,7 @@ async function main() {
   } finally { await browser.close(); }
 }
 
-module.exports = { courseUrl, readCourses, visitCourse, signinResult, signinCounts, checkLogin, saveStatus, siteState, playwright, fillLogin, readSavedLogin, openSetupBrowser };
+module.exports = { courseUrl, readCourses, visitCourse, signinResult, signinCounts, checkLogin, saveStatus, siteState, playwright, fillLogin, readSavedLogin, openSetupBrowser, browserExecutableCandidates, browserLaunchOptions };
 if (require.main === module) main().catch(error => {
   log(`错误：${error.message}`);
   process.exitCode = error.code === 'LOGIN_EXPIRED' ? 2 : 1;
